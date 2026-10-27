@@ -1,0 +1,376 @@
+---
+title: "Confirmatory Factor Analysis and Structural Equation Modeling of Trust"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: hide
+  word_document:
+    toc: true
+---
+
+# 1. Introduction
+
+This report examines alternative factor structures for trust in science and scientists using confirmatory factor analysis (CFA) and structural equation modeling (SEM).
+
+The following models are examined:
+
+1. Unidimensional CFA model
+2. Simple-structure two-factor CFA model
+3. Second-order CFA model
+4. Bifactor CFA model
+5. Bifactor SEM predicting belief in information
+6. Bifactor SEM predicting trust in individual scientists
+
+# 2. Data preparation
+
+## 2.1. Load packages
+
+```{r setup, message=FALSE, warning=FALSE}
+library(lavaan)
+library(qgraph)
+library(semPlot)
+library(haven)
+library(semTools)
+library(readxl)
+```
+
+## 2.2. Import the dataset
+
+```{r import-data}
+Data_Trust <- read_excel("TSModeling_Dataset.xlsx")
+
+# Inspect the dataset
+dim(Data_Trust)
+names(Data_Trust)
+head(Data_Trust)
+```
+
+## 2.3. Reverse-code items
+The following items are reverse-coded using the transformation `6 - x`, assuming a five-point response scale ranging from 1 to 5.
+
+```{r reverse-coding}
+reverse_cols <- c(
+  "ts1", "ts2", "ts3", "ts4", "ts6", "ts8",
+  "ts13", "ts17", "ts18", "ts19", "ts20", "ts21"
+)
+
+Data_Trust[, reverse_cols] <-
+  6 - Data_Trust[, reverse_cols]
+```
+
+# 3. Confirmatory factor analysis
+
+## 3.1. Unidimensional CFA model
+
+The unidimensional model specifies a single latent factor, `TrustinScienceScientist`, measured by all 21 observed items.
+
+```{r cfa-unidimensional}
+Model_Uni <- '
+  TrustinScienceScientist =~
+    ts1 + ts2 + ts3 + ts4 + ts5 + ts6 + ts7 +
+    ts8 + ts9 + ts10 + ts11 + ts12 + ts13 +
+    ts14 + ts15 + ts16 + ts17 + ts18 + ts19 +
+    ts20 + ts21
+'
+
+FitUni <- cfa(
+  Model_Uni,
+  data = Data_Trust,
+  std.lv = TRUE
+)
+
+summary(
+  FitUni,
+  fit.measures = TRUE,
+  standardized = TRUE
+)
+
+# Modification indices
+modindices(FitUni)
+```
+
+## 3.2. Simple-structure two-factor CFA model
+
+The two-factor model distinguishes between trust in science and trust in scientists.
+
+- `TrustinScience` is measured by five items.
+- `TrustinScientist` is measured by 16 items.
+
+```{r cfa-simple-structure}
+Model_Simple <- '
+  TrustinScience =~
+    ts3 + ts12 + ts14 + ts15 + ts21
+
+  TrustinScientist =~
+    ts1 + ts2 + ts4 + ts5 + ts6 + ts7 + ts8 +
+    ts9 + ts10 + ts11 + ts13 + ts16 + ts17 +
+    ts18 + ts19 + ts20
+'
+
+FitSimple <- cfa(
+  Model_Simple,
+  data = Data_Trust
+)
+
+summary(
+  FitSimple,
+  fit.measures = TRUE,
+  standardized = TRUE
+)
+
+# Modification indices
+modindices(FitSimple)
+```
+
+## 3.3. Second-order CFA model
+
+The second-order model specifies a general trust factor, `TrustGeneral`, underlying the two first-order factors.
+
+```{r cfa-second-order}
+Model_SecondOrder <- '
+  TrustinScience =~
+    ts3 + ts12 + ts14 + ts15 + ts21
+
+  TrustinScientist =~
+    ts1 + ts2 + ts4 + ts5 + ts6 + ts7 + ts8 +
+    ts9 + ts10 + ts11 + ts13 + ts16 + ts17 +
+    ts18 + ts19 + ts20
+
+  TrustGeneral =~
+    TrustinScience + TrustinScientist
+'
+
+Fit_SecondOrder <- cfa(
+  Model_SecondOrder,
+  data = Data_Trust
+)
+
+summary(
+  Fit_SecondOrder,
+  fit.measures = TRUE,
+  standardized = TRUE
+)
+
+# Modification indices
+modindices(Fit_SecondOrder)
+```
+
+### 3.3.1. Constrained second-order model
+
+The unconstrained second-order model may encounter identification problems or negative latent residual variances. The following version fixes the variance of the higher-order factor to 1 and fixes both first-order latent residual variances to 0.05.
+
+```{r cfa-second-order-constrained}
+Model_SecondOrder_Constrained <- '
+  TrustinScience =~
+    ts3 + ts12 + ts14 + ts15 + ts21
+
+  TrustinScientist =~
+    ts1 + ts2 + ts4 + ts5 + ts6 + ts7 + ts8 +
+    ts9 + ts10 + ts11 + ts13 + ts16 + ts17 +
+    ts18 + ts19 + ts20
+
+  TrustGeneral =~
+    TrustinScience + TrustinScientist
+
+  # Fix the variance of the higher-order factor
+  TrustGeneral ~~ 1*TrustGeneral
+
+  # Fix first-order latent residual variances
+  TrustinScience ~~ 0.05*TrustinScience
+  TrustinScientist ~~ 0.05*TrustinScientist
+'
+
+Fit_SecondOrder_Constrained <- cfa(
+  Model_SecondOrder_Constrained,
+  data = Data_Trust
+)
+
+summary(
+  Fit_SecondOrder_Constrained,
+  fit.measures = TRUE,
+  standardized = TRUE
+)
+
+# Modification indices
+modindices(Fit_SecondOrder_Constrained)
+```
+
+## 3.4. Bifactor CFA model
+
+The bifactor model specifies a general trust factor loading on all 21 items and two specific factors representing trust in science and trust in scientists.
+
+The general factor and the two specific factors are constrained to be mutually orthogonal.
+
+```{r cfa-bifactor}
+Model_Bi <- '
+  # General factor
+  TrustinScienceScientist =~
+    ts1 + ts2 + ts3 + ts4 + ts5 + ts6 + ts7 +
+    ts8 + ts9 + ts10 + ts11 + ts12 + ts13 +
+    ts14 + ts15 + ts16 + ts17 + ts18 + ts19 +
+    ts20 + ts21
+
+  # Specific factor: trust in science
+  TrustinScience =~
+    ts3 + ts12 + ts14 + ts15 + ts21
+
+  # Specific factor: trust in scientists
+  TrustinScientist =~
+    ts1 + ts2 + ts4 + ts5 + ts6 + ts7 + ts8 +
+    ts9 + ts10 + ts11 + ts13 + ts16 + ts17 +
+    ts18 + ts19 + ts20
+
+  # Orthogonality constraints
+  TrustinScienceScientist ~~ 0*TrustinScience
+  TrustinScienceScientist ~~ 0*TrustinScientist
+  TrustinScience ~~ 0*TrustinScientist
+'
+
+FitBi <- cfa(
+  Model_Bi,
+  data = Data_Trust
+)
+
+summary(
+  FitBi,
+  fit.measures = TRUE,
+  standardized = TRUE
+)
+
+# Modification indices
+modindices(FitBi)
+```
+
+# 4. Structural equation modeling
+
+## 4.1. Bifactor SEM predicting belief in information
+
+This model examines whether the general trust factor and the two specific trust factors predict `Outcome_beliefinfo`.
+
+```{r sem-bifactor-belief-information}
+Model_Bi1 <- '
+  # General factor
+  TrustinScienceScientist =~ ts1 + ts2 + ts3 + ts4 + ts5 + ts6 + ts7 +
+    ts8 + ts9 + ts10 + ts11 + ts12 + ts13 + ts14 + ts15 + ts16 +
+    ts17 + ts18 + ts19 + ts20 + ts21
+
+  # Specific factors
+  TrustinScience =~ ts3 + ts12 + ts14 + ts15 + ts21
+  TrustinScientist =~ ts1 + ts2 + ts4 + ts5 + ts6 + ts7 + ts8 +
+    ts9 + ts10 + ts11 + ts13 + ts16 + ts17 + ts18 + ts19 + ts20
+
+  # Orthogonal bifactor structure
+  TrustinScienceScientist ~~ 0*TrustinScience
+  TrustinScienceScientist ~~ 0*TrustinScientist
+  TrustinScience ~~ 0*TrustinScientist
+
+  # Structural path to outcome
+  Outcome_beliefinfo ~ TrustinScience + TrustinScientist + TrustinScienceScientist
+'
+
+SEMBi1 <- sem(
+  Model_Bi1,
+  data = Data_Trust,
+  std.lv = TRUE
+)
+
+summary(
+  SEMBi1,
+  fit.measures = TRUE,
+  standardized = TRUE
+)
+```
+
+## 4.2. Bifactor SEM predicting trust in individual scientists
+
+This model examines whether the general trust factor and the two specific trust factors predict `Outcome_highcred`.
+
+```{r sem-bifactor-individual-scientists}
+Model_Bi2 <- '
+  # General factor
+  TrustinScienceScientist =~ ts1 + ts2 + ts3 + ts4 + ts5 + ts6 + ts7 +
+    ts8 + ts9 + ts10 + ts11 + ts12 + ts13 + ts14 + ts15 + ts16 +
+    ts17 + ts18 + ts19 + ts20 + ts21
+
+  # Specific factors
+  TrustinScience =~ ts3 + ts12 + ts14 + ts15 + ts21
+  TrustinScientist =~ ts1 + ts2 + ts4 + ts5 + ts6 + ts7 + ts8 +
+    ts9 + ts10 + ts11 + ts13 + ts16 + ts17 + ts18 + ts19 + ts20
+
+  # Orthogonal bifactor structure
+  TrustinScienceScientist ~~ 0*TrustinScience
+  TrustinScienceScientist ~~ 0*TrustinScientist
+  TrustinScience ~~ 0*TrustinScientist
+
+  # Structural path to outcome
+  Outcome_highcred ~ TrustinScience + TrustinScientist + TrustinScienceScientist
+'
+
+SEMBi2 <- sem(
+  Model_Bi2,
+  data = Data_Trust,
+  std.lv = TRUE
+)
+
+summary(
+  SEMBi2,
+  fit.measures = TRUE,
+  standardized = TRUE
+)
+```
+
+# 5. Model comparison
+
+The following code extracts commonly reported fit indices from the fitted CFA and SEM models.
+
+```{r model-comparison}
+models <- list(
+  Unidimensional = FitUni,
+  SimpleStructure = FitSimple,
+  SecondOrder = Fit_SecondOrder,
+  SecondOrder_Constrained = Fit_SecondOrder_Constrained,
+  Bifactor = FitBi,
+  SEM_BeliefInformation = SEMBi1,
+  SEM_IndividualScientists = SEMBi2
+)
+
+fit_indices <- do.call(
+  rbind,
+  lapply(names(models), function(model_name) {
+    fit <- fitMeasures(
+      models[[model_name]],
+      c(
+        "chisq", "df", "pvalue",
+        "cfi", "tli", "rmsea", "srmr",
+        "aic", "bic"
+      )
+    )
+
+    data.frame(
+      Model = model_name,
+      t(fit),
+      row.names = NULL,
+      check.names = FALSE
+    )
+  })
+)
+
+rownames(fit_indices) <- NULL
+
+knitr::kable(
+  fit_indices,
+  digits = 3,
+  caption = "Fit indices for the CFA and SEM models"
+)
+```
+
+# 6. Conclusion
+
+This analysis compares alternative representations of trust in science and scientists and examines the predictive relationships between latent trust factors and the two outcomes.
+
+Model selection should consider overall fit, parameter estimates, identification, residual variances, theoretical coherence, and the interpretability of the latent factors rather than relying exclusively on individual fit indices.
+
